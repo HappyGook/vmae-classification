@@ -12,6 +12,10 @@ class BusViolenceDataset(Dataset):
         "VIOLENCE":    1,
         "NONVIOLENCE": 0,
     }
+    SUBDIR_MAP = {
+        "VIOLENCE": "Violence",
+        "NONVIOLENCE": "NoViolence",
+    }
 
     def __init__(self, root_dir, processor, n_frames: int = 16, stride: int = 4):
         self.processor = processor
@@ -20,16 +24,29 @@ class BusViolenceDataset(Dataset):
 
         self.samples: list[tuple[Path, int]] = []
         skipped = 0
+        seen = set()
 
-        for path in sorted(Path(root_dir).glob("*.mp4")):
-            prefix = path.stem.upper().split("_")[0]   # "VIOLENCE" / "NONVIOLENCE"
-            if prefix in self.LABEL_MAP:
-                self.samples.append((path, self.LABEL_MAP[prefix]))
-            else:
-                skipped+=1
+        for line in (root_dir / "train.txt").read_text().splitlines():
+            filename = line.strip()
+            if not filename or filename in seen:
+                continue
+            seen.add(filename)
+
+            prefix = filename.upper().split("_")[0]  # "VIOLENCE" / "NONVIOLENCE"
+            if prefix not in self.LABEL_MAP:
+                skipped += 1
+                continue
+
+            path = root_dir / self.SUBDIR_MAP[prefix] / filename
+            if not path.exists():
+                print(f"[dataset] missing file: {path}")
+                skipped += 1
+                continue
+
+            self.samples.append((path, self.LABEL_MAP[prefix]))
 
         if skipped:
-            print(f"[dataset] skipped {skipped} files with unrecognised prefix")
+            print(f"[dataset] skipped {skipped} entries (unknown prefix or missing file)")
 
         num_violence  = sum(1 for _, l in self.samples if l == 1)
         num_non_violence = sum(1 for _, l in self.samples if l == 0)
