@@ -1,7 +1,7 @@
 
 
 # model
-MODEL_NAME = "MCG-NJU/videomae-base"
+MODEL_NAME = "MCG-NJU/videomae-base-finetuned-kinetics"
 
 # drop-in replacements
 # MODEL_NAME = "MCG-NJU/videomae-large"
@@ -17,15 +17,19 @@ N_FRAMES = 16 # must match model's  pre-training
 STRIDE   = 4  # temporal stride between sampled frames
 
 # hardware
-DEVICE      = "cuda"
+DEVICE = "cuda" if __import__("torch").cuda.is_available() else "mps" if __import__("torch").backends.mps.is_available() else "cpu"
 
 # training
 BATCH_SIZE     = 8
+NUM_WORKERS = 4
 NUM_EPOCHS     = 10
 LEARNING_RATE  = 1e-4
 WEIGHT_DECAY   = 0.05
 FREEZE_ENCODER = False   # True = only train the head
 
+# inference output
+TOP_K = 5          # how many K400 predictions print per clip
+
 # paths
-DATA_DIR = "/bus-violence"
-CHECKPOINT_DIR = "./checkpoints"
+DATA_DIR = "bus-violence"
+PREDICTIONS_CSV = "predictions.csv"

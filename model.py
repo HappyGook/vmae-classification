@@ -10,22 +10,16 @@ def build_model() -> VideoMAEForVideoClassification:
     """
     Load VideoMAE encoder with a classification head.
     """
-    model = VideoMAEForVideoClassification.from_pretrained(
-        config.MODEL_NAME,
-        num_labels=config.NUM_CLASSES,
-        id2label=config.ID2LABEL,
-        label2id=config.LABEL2ID,
-        ignore_mismatched_sizes=False,
-    )
+    model = VideoMAEForVideoClassification.from_pretrained(config.MODEL_NAME)
 
-    if config.FREEZE_ENCODER:
-        for param in model.videomae.parameters():
-            param.requires_grad = False
-        print("[model] encoder frozen — only the classification head will be trained")
+    n_classes = model.config.num_labels
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"[model] loaded {config.MODEL_NAME}  ({n_params:,} parameters)")
+    print(f"[model] output classes: {n_classes}")
 
-    n_total = sum(p.numel() for p in model.parameters())
-    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"[model] {config.MODEL_NAME}")
-    print(f"[model] parameters: {n_total:,} total  /  {n_trainable:,} trainable")
+    if n_classes < 2:
+        raise ValueError(
+            f"Model has only {n_classes} output class(es). "
+        )
 
     return model.to(config.DEVICE)

@@ -21,6 +21,7 @@ class BusViolenceDataset(Dataset):
         self.processor = processor
         self.n_frames  = n_frames
         self.stride    = stride
+        root_dir = Path(root_dir)
 
         self.samples: list[tuple[Path, int]] = []
         skipped = 0
