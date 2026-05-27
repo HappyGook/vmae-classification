@@ -1,0 +1,11 @@
+huggingface_hub>=1.15.0
+matplotlib>=3.10.8
+numpy>=2.3.4
+pandas>=2.3.3
+sympy>=1.14.0
+torch>=2.9.0
+transformers>=5.8.1
+
+torchvision
+torchcodec
+pillow
