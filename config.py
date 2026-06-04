@@ -1,7 +1,7 @@
 
 
 # model
-MODEL_NAME = "MCG-NJU/videomae-base-finetuned-kinetics"
+MODEL_NAME = "OPear/videomae-large-finetuned-UCF-Crime"
 
 # drop-in replacements
 # MODEL_NAME = "MCG-NJU/videomae-large"
@@ -13,7 +13,7 @@ ID2LABEL = {0: "non-violence", 1: "violence"}
 LABEL2ID = {"non-violence": 0, "violence": 1}
 
 # video sampling
-N_FRAMES = 16 # must match model's  pre-training
+N_FRAMES = 16 # must match model's pre-training
 STRIDE   = 4  # temporal stride between sampled frames
 
 # hardware
@@ -28,7 +28,7 @@ WEIGHT_DECAY   = 0.05
 FREEZE_ENCODER = False   # True = only train the head
 
 # inference output
-TOP_K = 5          # how many K400 predictions print per clip
+TOP_K = 5          # how many predictions print per clip
 
 # paths
 DATA_DIR = "bus-violence"

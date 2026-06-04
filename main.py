@@ -13,7 +13,7 @@ def run():
     model = build_model()
     model.eval()
 
-    id2label = model.config.id2label  # {int: "class name"} for all 400 K400 classes
+    id2label = model.config.id2label  # {int: "class name"} for all classes
 
     dataset = BusViolenceDataset(
         root_dir=config.DATA_DIR,
@@ -32,7 +32,7 @@ def run():
     rows = []  # accumulated for CSV
 
     print(f"\n{'─' * 64}")
-    print(f"  {'filename':<30}  gt label top-1 K400 prediction")
+    print(f"  {'filename':<30}  gt label top-1 prediction")
     print(f"{'─' * 64}")
 
     with torch.no_grad():
