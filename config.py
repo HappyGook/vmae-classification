@@ -28,7 +28,7 @@ WEIGHT_DECAY   = 0.05
 FREEZE_ENCODER = False   # True = only train the head
 
 # inference output
-TOP_K = 5          # how many predictions print per clip
+TOP_K = 2          # how many predictions print per clip
 
 # paths
 DATA_DIR = "bus-violence"
