@@ -17,13 +17,14 @@ class BusViolenceDataset(Dataset):
         "NONVIOLENCE": "NoViolence",
     }
 
-    def __init__(self, root_dir, processor, n_frames: int = 16, stride: int = 4):
+    def __init__(self, root_dir, processor, n_frames: int = 16, stride: int = 4, split: str = "train"):
         self.processor = processor
         self.n_frames  = n_frames
         self.stride    = stride
+        self.split = split
         root_dir = Path(root_dir)
 
-        self.samples: list[tuple[Path, int]] = []
+        self.train_samples: list[tuple[Path, int]] = []
         skipped = 0
         seen = set()
 
@@ -44,22 +45,51 @@ class BusViolenceDataset(Dataset):
                 skipped += 1
                 continue
 
-            self.samples.append((path, self.LABEL_MAP[prefix]))
+            self.train_samples.append((path, self.LABEL_MAP[prefix]))
 
         if skipped:
-            print(f"[dataset] skipped {skipped} entries (unknown prefix or missing file)")
+            print(f"[dataset: training] skipped {skipped} entries (unknown prefix or missing file)")
 
-        num_violence  = sum(1 for _, l in self.samples if l == 1)
-        num_non_violence = sum(1 for _, l in self.samples if l == 0)
-        print(f"[dataset] loaded {len(self.samples)} clips  "
-              f"(violence={num_violence}, non-violence={num_non_violence})")
+        print(f"[dataset: training] loaded {len(self.train_samples)} clips  "
+              f"(violence={sum(1 for _, l in self.train_samples if l == 1)}, "
+              f"non-violence={sum(1 for _, l in self.train_samples if l == 0)})")
+
+        self.test_samples: list[tuple[Path, int]] = []
+        skipped = 0
+        seen = set()
+
+        for line in (root_dir / "test.txt").read_text().splitlines():
+            filename = line.strip()
+            if not filename or filename in seen:
+                continue
+            seen.add(filename)
+
+            prefix = filename.upper().split("_")[0]  # "VIOLENCE" / "NONVIOLENCE"
+            if prefix not in self.LABEL_MAP:
+                skipped += 1
+                continue
+
+            path = root_dir / self.SUBDIR_MAP[prefix] / filename
+            if not path.exists():
+                print(f"[dataset] missing file: {path}")
+                skipped += 1
+                continue
+
+            self.test_samples.append((path, self.LABEL_MAP[prefix]))
+
+        if skipped:
+            print(f"[dataset: test] skipped {skipped} entries (unknown prefix or missing file)")
+
+        print(f"[dataset: test] loaded {len(self.test_samples)} clips  "
+              f"(violence={sum(1 for _, l in self.test_samples if l == 1)}, "
+              f"non-violence={sum(1 for _, l in self.test_samples if l == 0)})")
 
 
     def __len__(self) -> int:
-        return len(self.samples)
+        return len(self.train_samples if self.split == "train" else self.test_samples)
 
     def __getitem__(self, idx: int):
-        path, label = self.samples[idx]
+        path, label = self.train_samples[idx] if self.split == "train" else self.test_samples[idx]
         frames = self._load_and_sample(path)
 
         # squeeze the batch dim so DataLoader can re-batch correctly

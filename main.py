@@ -1,10 +1,117 @@
 import csv
 from pathlib import Path
 import torch
+from torch import nn
 from torch.utils.data import DataLoader
 import config
 from dataset import BusViolenceDataset
-from model import build_processor, build_model
+from model import build_processor, build_model, build_model_for_finetuning
+
+
+def train():
+    processor = build_processor()
+    model = build_model()
+
+    train_dataset = BusViolenceDataset(
+        root_dir=config.DATA_DIR,
+        processor=processor,
+        n_frames=config.N_FRAMES,
+        stride=config.STRIDE,
+        split="train",
+    )
+    val_dataset = BusViolenceDataset(
+        root_dir=config.DATA_DIR,
+        processor=processor,
+        n_frames=config.N_FRAMES,
+        stride=config.STRIDE,
+        split="test",
+    )
+
+
+    train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE,
+                              shuffle=True, num_workers=config.NUM_WORKERS,
+                              pin_memory=config.DEVICE == "cuda")
+    val_loader   = DataLoader(val_dataset,   batch_size=config.BATCH_SIZE,
+                              shuffle=False, num_workers=config.NUM_WORKERS,
+                              pin_memory=config.DEVICE == "cuda")
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=config.LEARNING_RATE,
+        weight_decay=config.WEIGHT_DECAY,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=config.EPOCHS
+    )
+
+    save_dir = Path(config.CHECKPOINT_DIR)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    best_val_acc = 0.0
+
+    for epoch in range(1, config.EPOCHS + 1):
+        # ── Train ──────────────────────────────────────────────
+        model.train()
+        train_loss, train_correct, train_total = 0.0, 0, 0
+
+        for pixel_values, labels, _ in train_loader:
+            pixel_values = pixel_values.to(config.DEVICE)
+            labels       = labels.to(config.DEVICE)
+
+            optimizer.zero_grad()
+            logits = model(pixel_values=pixel_values).logits   # (B, 2)
+            loss   = criterion(logits, labels)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+
+            train_loss    += loss.item() * labels.size(0)
+            train_correct += (logits.argmax(1) == labels).sum().item()
+            train_total   += labels.size(0)
+
+        scheduler.step()
+
+        # ── Validate ───────────────────────────────────────────
+        model.eval()
+        val_loss, val_correct, val_total = 0.0, 0, 0
+
+        with torch.no_grad():
+            for pixel_values, labels, _ in val_loader:
+                pixel_values = pixel_values.to(config.DEVICE)
+                labels       = labels.to(config.DEVICE)
+                logits = model(pixel_values=pixel_values).logits
+                loss   = criterion(logits, labels)
+                val_loss    += loss.item() * labels.size(0)
+                val_correct += (logits.argmax(1) == labels).sum().item()
+                val_total   += labels.size(0)
+
+        t_acc = train_correct / train_total
+        v_acc = val_correct   / val_total
+        t_l   = train_loss    / train_total
+        v_l   = val_loss      / val_total
+
+        print(f"Epoch {epoch:>3}/{config.EPOCHS}  "
+              f"train loss {t_l:.4f}  acc {t_acc:.3f}  │  "
+              f"val loss {v_l:.4f}  acc {v_acc:.3f}")
+
+        # ── Save best checkpoint ───────────────────────────────
+        if v_acc > best_val_acc:
+            best_val_acc = v_acc
+            best_path = save_dir / "best"
+            model.save_pretrained(best_path)       # saves config.json + model weights
+            processor.save_pretrained(best_path)   # saves preprocessor_config.json
+            print(f"  ✓ saved best model (val_acc={v_acc:.3f}) → {best_path}")
+
+        # ── Save periodic checkpoint every N epochs ────────────
+        if epoch % config.SAVE_EVERY == 0:
+            ckpt_path = save_dir / f"epoch_{epoch:03d}"
+            model.save_pretrained(ckpt_path)
+            processor.save_pretrained(ckpt_path)
+            print(f"  ✓ checkpoint saved → {ckpt_path}")
+
+    print(f"\nTraining complete. Best val accuracy: {best_val_acc:.3f}")
+    print(f"Best model saved to: {(save_dir / 'best').resolve()}")
 
 
 def run():
@@ -81,4 +188,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    train()

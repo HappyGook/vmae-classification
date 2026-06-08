@@ -23,8 +23,11 @@ DEVICE = "cuda" if __import__("torch").cuda.is_available() else "mps" if __impor
 BATCH_SIZE     = 8
 NUM_WORKERS = 4
 NUM_EPOCHS     = 10
-LEARNING_RATE  = 1e-4
-WEIGHT_DECAY   = 0.05
+LEARNING_RATE  = 3e-5
+WEIGHT_DECAY   = 1e-4
+EPOCHS         = 10
+SAVE_EVERY     = 3           # save a checkpoint every N epochs
+CHECKPOINT_DIR = "checkpoints"
 FREEZE_ENCODER = False   # True = only train the head
 
 # inference output
