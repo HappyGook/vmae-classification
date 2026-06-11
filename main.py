@@ -1,5 +1,6 @@
 import csv
 from pathlib import Path
+import time
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -11,6 +12,14 @@ from model import build_processor, build_model, build_model_for_finetuning
 def train():
     processor = build_processor()
     model = build_model()
+    print("\n=== MODEL DEBUG INFO ===")
+    print(f"Model class: {model.__class__.__name__}")
+    print(f"Device target: {config.DEVICE}")
+    print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+    print(f"Frozen parameters: {sum(p.numel() for p in model.parameters() if not p.requires_grad):,}")
+    print(f"Model config: {model.config}")
+    print("========================\n")
 
     train_dataset = BusViolenceDataset(
         root_dir=config.DATA_DIR,
@@ -51,11 +60,15 @@ def train():
     best_val_acc = 0.0
 
     for epoch in range(1, config.EPOCHS + 1):
+        epoch_start = time.time()
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"\n--- Starting epoch {epoch}/{config.EPOCHS} | lr={current_lr:.8f} ---")
         # ── Train ──────────────────────────────────────────────
         model.train()
         train_loss, train_correct, train_total = 0.0, 0, 0
-
         for pixel_values, labels, _ in train_loader:
+            batch_start = time.time()
+            print(f"Batch {train_total // config.BATCH_SIZE + 1}: input shape={tuple(pixel_values.shape)}, labels={labels.tolist()}")
             pixel_values = pixel_values.to(config.DEVICE)
             labels       = labels.to(config.DEVICE)
 
@@ -63,8 +76,10 @@ def train():
             logits = model(pixel_values=pixel_values).logits   # (B, 2)
             loss   = criterion(logits, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+            batch_time = time.time() - batch_start
+            print(f"    loss={loss.item():.5f} | batch_time={batch_time:.3f}s | grad_norm={grad_norm:.5f}")
 
             train_loss    += loss.item() * labels.size(0)
             train_correct += (logits.argmax(1) == labels).sum().item()
@@ -91,23 +106,35 @@ def train():
         t_l   = train_loss    / train_total
         v_l   = val_loss      / val_total
 
-        print(f"Epoch {epoch:>3}/{config.EPOCHS}  "
-              f"train loss {t_l:.4f}  acc {t_acc:.3f}  │  "
-              f"val loss {v_l:.4f}  acc {v_acc:.3f}")
+        epoch_time = time.time() - epoch_start
+        print(f"Epoch {epoch:>3}/{config.EPOCHS} finished in {epoch_time:.2f}s")
+        print(f"  train loss={t_l:.4f} acc={t_acc:.3f}")
+        print(f"  val   loss={v_l:.4f} acc={v_acc:.3f}")
+        print(f"  lr={optimizer.param_groups[0]['lr']:.8f}")
+        print(f"  best_val_acc={best_val_acc:.3f}")
 
         # ── Save best checkpoint ───────────────────────────────
         if v_acc > best_val_acc:
             best_val_acc = v_acc
             best_path = save_dir / "best"
+            print("Checkpoint debug:")
+            print(f"  Saving epoch: {epoch}")
+            print(f"  Validation accuracy: {v_acc:.5f}")
+            print(f"  Directory: {best_path.resolve()}")
+            print(f"  Files before save: {list(best_path.glob('*')) if best_path.exists() else 'directory does not exist'}")
             model.save_pretrained(best_path)       # saves config.json + model weights
             processor.save_pretrained(best_path)   # saves preprocessor_config.json
+            print(f"  Files after save: {[p.name for p in best_path.glob('*')]}")
             print(f"  ✓ saved best model (val_acc={v_acc:.3f}) → {best_path}")
 
         # ── Save periodic checkpoint every N epochs ────────────
         if epoch % config.SAVE_EVERY == 0:
             ckpt_path = save_dir / f"epoch_{epoch:03d}"
+            print(f"Checkpoint debug: periodic save at epoch {epoch}")
+            print(f"  Path: {ckpt_path.resolve()}")
             model.save_pretrained(ckpt_path)
             processor.save_pretrained(ckpt_path)
+            print(f"  Saved files: {[p.name for p in ckpt_path.glob('*')]}")
             print(f"  ✓ checkpoint saved → {ckpt_path}")
 
     print(f"\nTraining complete. Best val accuracy: {best_val_acc:.3f}")
