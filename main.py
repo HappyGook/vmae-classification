@@ -1,3 +1,4 @@
+import argparse
 import csv
 from pathlib import Path
 import time
@@ -154,6 +155,7 @@ def run():
         processor=processor,
         n_frames=config.N_FRAMES,
         stride=config.STRIDE,
+        split="test"
     )
     loader = DataLoader(
         dataset,
@@ -215,4 +217,11 @@ def run():
 
 
 if __name__ == "__main__":
-    train()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["train", "run"], default="run")
+    args = parser.parse_args()
+
+    if args.mode == "train":
+        train()
+    elif args.mode == "run":
+        run()
