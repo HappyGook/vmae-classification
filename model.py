@@ -6,11 +6,14 @@ def build_processor() -> VideoMAEImageProcessor:
     """Load the image processor tied to the chosen model."""
     return VideoMAEImageProcessor.from_pretrained(config.MODEL_NAME)
 
-def build_model() -> VideoMAEForVideoClassification:
+def build_model(path = "") -> VideoMAEForVideoClassification:
     """
     Load VideoMAE encoder with a classification head.
     """
-    model = VideoMAEForVideoClassification.from_pretrained(config.MODEL_NAME)
+    if path:
+        model = VideoMAEForVideoClassification.from_pretrained(path)
+    else:
+        model = VideoMAEForVideoClassification.from_pretrained(config.MODEL_NAME)
 
     n_classes = model.config.num_labels
     n_params = sum(p.numel() for p in model.parameters())

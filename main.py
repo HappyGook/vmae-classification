@@ -145,7 +145,7 @@ def train():
 def run():
     # setup
     processor = build_processor()
-    model = build_model()
+    model = build_model("checkpoints/best")
     model.eval()
 
     id2label = model.config.id2label  # {int: "class name"} for all classes
