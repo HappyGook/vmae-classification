@@ -9,3 +9,4 @@ transformers>=5.8.1
 torchvision
 torchcodec
 pillow
+decord2>=3.4.0

@@ -1,12 +1,16 @@
 import argparse
 import csv
+import json
 from pathlib import Path
 import time
+
+import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 import config
 from dataset import BusViolenceDataset
+from inference import run_inference, aggregate_to_timeline
 from model import build_processor, build_model, build_model_for_finetuning
 
 
@@ -215,13 +219,48 @@ def run():
 
     print(f"Saved {len(rows)} rows → {out.resolve()}")
 
+def boss_inference():
+    processor = build_processor()
+    model = build_model("checkpoints/best")
+
+    results, fps, total_frames = run_inference(
+        args.video_path, model, processor,
+        clip_len=args.clip_len, stride=args.stride,
+        batch_size=args.batch_size, device=config.DEVICE
+    )
+
+    timeline = aggregate_to_timeline(results, total_frames, agg="max")
+
+    out = {
+        "video": args.video,
+        "fps": fps,
+        "total_frames": total_frames,
+        "num_windows": len(results),
+        "windows": results,
+        "video_level_score": float(max(r["score"] for r in results)) if results else None,
+    }
+    with open(args.out, "w") as f:
+        json.dump(out, f, indent=2)
+
+    np.save(args.out.replace(".json", "_timeline.npy"),timeline)
+    print(f"Saved {len(results)} window predictions to {args.out}")
+    print(f"Saved per-frame timeline ({total_frames} frames) to "
+          f"{args.out.replace('.json', '_timeline.npy')}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["train", "run"], default="run")
+    parser.add_argument("--mode", choices=["train", "run", "boss"], default="run")
+    parser.add_argument("--clip_len", type=int, default=48)
+    parser.add_argument("--stride", type=int, default=1,
+                        help="sliding step between window starts, in sampled-frame units; "
+                             "smaller = more overlap = better localization, slower")
+    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--out", default="inference.json")
     args = parser.parse_args()
 
     if args.mode == "train":
         train()
     elif args.mode == "run":
         run()
+    elif args.mode == "boss":
+        boss_inference()
