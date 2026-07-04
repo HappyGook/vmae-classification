@@ -1,12 +1,13 @@
 
 
 # model
-MODEL_NAME = "Nikeytas/videomae-crime-detector-production-v1"
+MODEL_NAME = "MCG-NJU/videomae-base"
 
 # models used in experiments
 # MODEL_NAME = "MCG-NJU/videomae-base"
 # MODEL_NAME = "OPear/videomae-large-finetuned-UCF-Crime"
 # MODEL_NAME = "Nikeytas/videomae-crime-detector-production-v1"
+# MODEL_NAME = "checkpoints/best"
 
 NUM_CLASSES = 2  # violence=1, non-violence=0
 ID2LABEL = {0: "non-violence", 1: "violence"}

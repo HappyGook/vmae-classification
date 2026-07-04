@@ -149,7 +149,7 @@ def train():
 def run():
     # setup
     processor = build_processor()
-    model = build_model("checkpoints/best")
+    model = build_model(config.MODEL_NAME)
     model.eval()
 
     id2label = model.config.id2label  # {int: "class name"} for all classes
@@ -211,7 +211,7 @@ def run():
     print(f"{'─' * 64}\n")
 
     # save CSV
-    out = Path(config.PREDICTIONS_CSV)
+    out = Path(str.replace((config.MODEL_NAME + config.PREDICTIONS_CSV),'/','-'))
     with open(out, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=rows[0].keys())
         writer.writeheader()
