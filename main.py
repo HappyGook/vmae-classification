@@ -211,7 +211,7 @@ def run():
     print(f"{'─' * 64}\n")
 
     # save CSV
-    out = Path(str.replace((config.MODEL_NAME + config.PREDICTIONS_CSV),'/','-'))
+    out = Path("predictions/"+str.replace((config.MODEL_NAME + '-'+ config.PREDICTIONS_CSV),'/','-'))
     with open(out, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=rows[0].keys())
         writer.writeheader()
@@ -250,6 +250,7 @@ def boss_inference():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["train", "run", "boss"], default="run")
+    parser.add_argument("--preset", choices=list(config.PRESETS), default=config.DEFAULT_PRESET)
     parser.add_argument("--clip_len", type=int, default=48)
     parser.add_argument("--stride", type=int, default=1,
                         help="sliding step between window starts, in sampled-frame units; "
@@ -257,6 +258,8 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--out", default="inference.json")
     args = parser.parse_args()
+
+    config.apply_preset(args.preset)
 
     if args.mode == "train":
         train()

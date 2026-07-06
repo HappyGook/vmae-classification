@@ -1,17 +1,44 @@
 
+def apply_preset(name: str):
+    if name not in PRESETS:
+        raise ValueError(f"Unknown preset: {name}")
+    p = PRESETS[name]
+    globals().update(p)
+    print(f"Preset '{name}' applied")
 
-# model
-MODEL_NAME = "MCG-NJU/videomae-base"
+PRESETS = {
+    "kinetics": {
+        "MODEL_NAME": "MCG-NJU/videomae-base-finetuned-kinetics",
+        "NUM_CLASSES": 400,
+        "ID2LABEL": None,   # None = trust the checkpoint's own config.json
+        "LABEL2ID": None,
+        "TOP_K": 5,
+    },
+    "ucf_crime": {
+        "MODEL_NAME": "OPear/videomae-large-finetuned-UCF-Crime",
+        "NUM_CLASSES": 14,
+        "ID2LABEL": None,   # this checkpoint ships its own 14-class mapping
+        "LABEL2ID": None,
+        "TOP_K": 3,
+    },
+    "binary": {
+        "MODEL_NAME": "checkpoints/best",  # fine-tuned violence/non-violence ckpt
+        "NUM_CLASSES": 2,
+        "ID2LABEL": {0: "non-violence", 1: "violence"},
+        "LABEL2ID": {"non-violence": 0, "violence": 1},
+        "TOP_K": 2,
+    },
+    "binary-new": {
+        "MODEL_NAME": "Nikeytas/videomae-crime-detector-production-v1",
+        "NUM_CLASSES": 2,
+        "ID2LABEL": {0: "non-violence", 1: "violence"},
+        "LABEL2ID": {"non-violence": 0, "violence": 1},
+        "TOP_K": 2,
+    },
+}
 
-# models used in experiments
-# MODEL_NAME = "MCG-NJU/videomae-base"
-# MODEL_NAME = "OPear/videomae-large-finetuned-UCF-Crime"
-# MODEL_NAME = "Nikeytas/videomae-crime-detector-production-v1"
-# MODEL_NAME = "checkpoints/best"
-
-NUM_CLASSES = 2  # violence=1, non-violence=0
-ID2LABEL = {0: "non-violence", 1: "violence"}
-LABEL2ID = {"non-violence": 0, "violence": 1}
+DEFAULT_PRESET = "binary"
+apply_preset(DEFAULT_PRESET)
 
 # video sampling
 N_FRAMES = 16 # must match model's pre-training
@@ -30,9 +57,6 @@ EPOCHS         = 10
 SAVE_EVERY     = 3           # save a checkpoint every N epochs
 CHECKPOINT_DIR = "checkpoints"
 FREEZE_ENCODER = False   # True = only train the head
-
-# inference output
-TOP_K = 2          # how many predictions print per clip
 
 # paths
 DATA_DIR = "bus-violence"
