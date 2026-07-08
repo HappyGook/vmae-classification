@@ -1,17 +1,15 @@
 import argparse
 import csv
-import json
 from pathlib import Path
 import time
-
-import numpy as np
 import torch
+from inference import parse_annotation_sheet
+from boss_eval import evaluate_dataset
 from torch import nn
 from torch.utils.data import DataLoader
 import config
 from dataset import BusViolenceDataset
-from inference import run_inference, aggregate_to_timeline
-from model import build_processor, build_model, build_model_for_finetuning
+from model import build_processor, build_model
 
 
 def train():
@@ -223,29 +221,14 @@ def boss_inference():
     processor = build_processor()
     model = build_model("checkpoints/best")
 
-    results, fps, total_frames = run_inference(
-        args.video_path, model, processor,
-        clip_len=args.clip_len, stride=args.stride,
-        batch_size=args.batch_size, device=config.DEVICE
-    )
+    df = parse_annotation_sheet(args.annotation_xlsx, sheet_name=1)
+    report = evaluate_dataset(model, "./boss", processor, df,
+                              device=config.DEVICE, threshold=0.5)
 
-    timeline = aggregate_to_timeline(results, total_frames, agg="max")
-
-    out = {
-        "video": args.video,
-        "fps": fps,
-        "total_frames": total_frames,
-        "num_windows": len(results),
-        "windows": results,
-        "video_level_score": float(max(r["score"] for r in results)) if results else None,
-    }
-    with open(args.out, "w") as f:
-        json.dump(out, f, indent=2)
-
-    np.save(args.out.replace(".json", "_timeline.npy"),timeline)
-    print(f"Saved {len(results)} window predictions to {args.out}")
-    print(f"Saved per-frame timeline ({total_frames} frames) to "
-          f"{args.out.replace('.json', '_timeline.npy')}")
+    print("Metrics:", report["metrics"])
+    print(f"{len(report['errors'])} misclassified windows across "
+          f"{len(report['per_video'])} evaluated videos "
+          f"({len(report['skipped'])} skipped)")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
