@@ -20,7 +20,7 @@ from inference import (
 )
 
 
-def evaluate_video(model, video_path, processor, df, clip_len=48, stride=1,
+def evaluate_video(model, video_path, processor, df, clip_len=None, stride=None,
                     batch_size=4, device="cuda", threshold=0.5):
     """
     Runs inference on a single video and attaches ground-truth labels.
@@ -34,6 +34,7 @@ def evaluate_video(model, video_path, processor, df, clip_len=48, stride=1,
       results  -- every window with score/true_label/pred_label/correct
       errors   -- subset of results where pred_label != true_label
     """
+    print(f"========Evaluating {video_path}...=======\n")
     situation, camera = parse_video_filename(video_path)
 
     results, fps, total_frames = run_inference(
@@ -102,7 +103,7 @@ def compute_metrics(windows):
     }
 
 
-def evaluate_dataset(model, video_dir, processor, df, clip_len=48, stride=1,
+def evaluate_dataset(model, video_dir, processor, df, clip_len=None, stride=None,
                       batch_size=4, device="cuda", threshold=0.5,
                       extensions=(".avi",)):
     """

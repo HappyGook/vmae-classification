@@ -145,21 +145,30 @@ def label_window(start_frame, end_frame, segments):
     ))
 
 
-def get_windows(total_frames, clip_len=48, stride=1):
-    if total_frames <= clip_len:
+def get_windows(total_frames, clip_len=16, stride=4, hop=None):
+    """
+    clip_len: number of frames sampled per clip (fed to the model)
+    stride:   spacing between sampled frames within a clip
+    hop:      how far the window start advances between clips
+              (defaults to stride, but is logically independent)
+    """
+    span = (clip_len - 1) * stride + 1  # raw frames covered by one clip
+    if hop is None:
+        hop = stride
+
+    if total_frames <= span:
         yield 0
         return
 
 
     start = 0
     last_start = 0
-
-    while start + clip_len <= total_frames:
+    while start + span <= total_frames:
         yield start
-        start += stride
+        start += hop
         last_start = start
 
-    tail_start = total_frames - clip_len
+    tail_start = total_frames - span
     if tail_start > last_start:
         yield tail_start
 
@@ -176,7 +185,12 @@ def preprocess(frames, processor):
     return inputs
 
 @torch.no_grad()
-def run_inference(model, video_path, processor, clip_len=48, stride=1, batch_size=4, device="cuda"):
+def run_inference(model, video_path, processor, clip_len=None, stride=None, batch_size=4, device="cuda"):
+    if clip_len is None:
+        clip_len = model.config.num_frames
+    if stride is None:
+        stride = 4 # getattr(model.config, "sampling_stride", 4) <- there is no such attribute, therefore hardcoded
+
     vr = VideoReader(video_path, ctx=cpu(0))
     fps = vr.get_avg_fps()
     total_frames = len(vr)
@@ -189,8 +203,8 @@ def run_inference(model, video_path, processor, clip_len=48, stride=1, batch_siz
             return
         pixel_values = torch.cat(batch_clips, dim=0).to(device)
         logits = model(pixel_values=pixel_values).logits
-        probs = torch.sigmoid(logits).squeeze(-1).cpu().numpy()
-        probs = np.atleast_1d(probs)
+        probs = torch.softmax(logits, dim=-1)[:, 1]  # P(violence) \in R^1
+        probs = probs.cpu().numpy()
         for meta, prob in zip(batch_meta, probs):
             meta["score"] = float(prob)
             results.append(meta)
@@ -207,6 +221,7 @@ def run_inference(model, video_path, processor, clip_len=48, stride=1, batch_siz
             flush()
 
         flush()
+        print(f"Processed {round(indexes[-1] / fps, 2)} seconds")
 
     return results, fps, total_frames
 

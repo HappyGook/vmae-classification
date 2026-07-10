@@ -221,8 +221,8 @@ def boss_inference():
     processor = build_processor()
     model = build_model("checkpoints/best")
 
-    df = parse_annotation_sheet(args.annotation_xlsx, sheet_name=1)
-    report = evaluate_dataset(model, "./boss", processor, df,
+    df = parse_annotation_sheet("boss/AnnotationsBOSS_v1.xlsx", sheet_name=1)
+    report = evaluate_dataset(model, "boss", processor, df,
                               device=config.DEVICE, threshold=0.5)
 
     print("Metrics:", report["metrics"])
