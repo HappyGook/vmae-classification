@@ -7,7 +7,7 @@ Assumes parse_annotations.py (run_inference, get_windows, sample_clip,
 preprocess, aggregate_to_timeline, parse_annotation_sheet,
 parse_video_filename, get_violence_segments, label_window) is importable.
 """
-
+import json
 import os
 import numpy as np
 
@@ -19,9 +19,41 @@ from inference import (
     label_window,
 )
 
+DEFAULT_SAVE_DIR = "boss-evals"
+
+
+def _to_serializable(obj):
+    """Recursively convert numpy types / tuples into plain JSON-friendly types."""
+    if isinstance(obj, dict):
+        return {k: _to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_serializable(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.generic):
+        return obj.item()
+    return obj
+
+
+def _safe_name(*parts):
+    """Build a filesystem-safe filename from arbitrary parts."""
+    raw = "_".join(str(p) for p in parts if p is not None)
+    return "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in raw)
+
+
+def save_json(data, save_dir, filename):
+    """Serialize `data` to save_dir/filename (adds .json if missing)."""
+    os.makedirs(save_dir, exist_ok=True)
+    if not filename.endswith(".json"):
+        filename += ".json"
+    path = os.path.join(save_dir, filename)
+    with open(path, "w") as f:
+        json.dump(_to_serializable(data), f, indent=2)
+    return path
+
 
 def evaluate_video(model, video_path, processor, df, clip_len=None, stride=None,
-                    batch_size=4, device="cuda", threshold=0.5):
+                    batch_size=4, device="cuda", threshold=0.5, save_dir=DEFAULT_SAVE_DIR, save=True):
     """
     Runs inference on a single video and attaches ground-truth labels.
 
@@ -55,7 +87,7 @@ def evaluate_video(model, video_path, processor, df, clip_len=None, stride=None,
 
     errors = [r for r in results if not r["correct"]]
 
-    return {
+    out = {
         "video": situation,
         "camera": camera,
         "fps": fps,
@@ -66,6 +98,13 @@ def evaluate_video(model, video_path, processor, df, clip_len=None, stride=None,
         "pred_timeline": aggregate_to_timeline(results, total_frames, agg="max"),
         "true_timeline": true_timeline(segments, total_frames),
     }
+
+    if save:
+        filename = _safe_name(situation, camera)
+        path = save_json(out, save_dir, filename)
+        print(f"Saved per-video eval to {path}")
+
+    return out
 
 
 def true_timeline(segments, total_frames):
@@ -105,7 +144,8 @@ def compute_metrics(windows):
 
 def evaluate_dataset(model, video_dir, processor, df, clip_len=None, stride=None,
                       batch_size=4, device="cuda", threshold=0.5,
-                      extensions=(".avi",)):
+                      extensions=(".avi",), save_dir=DEFAULT_SAVE_DIR, save=True,
+                     dataset_filename="full_boss-evals"):
     """
     Walks video_dir, evaluates every matching video, and aggregates
     per-window results + errors + metrics across the whole set.
@@ -140,9 +180,15 @@ def evaluate_dataset(model, video_dir, processor, df, clip_len=None, stride=None
     all_windows = [r for v in per_video for r in v["results"]]
     all_errors = [r for v in per_video for r in v["errors"]]
 
-    return {
+    dataset_out = {
         "per_video": per_video,
         "errors": all_errors,
         "metrics": compute_metrics(all_windows),
         "skipped": skipped,
     }
+
+    if save:
+        path = save_json(dataset_out, save_dir, dataset_filename)
+        print(f"Saved full dataset eval to {path}")
+
+    return dataset_out
