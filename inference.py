@@ -12,6 +12,15 @@ decord.bridge.set_bridge("torch")
 
 CAMERA_HEADER_RE = re.compile(r'^Camera\s*(\d+)$', re.IGNORECASE)
 VIDEO_FILENAME_RE = re.compile(r'^(?P<situation>.+)\.Cam(?P<cam>\d+)\.avi$', re.IGNORECASE)
+FRAME_FIELD_RE = re.compile(r'^(Starting|Ending)\s*Frame\s*(\d*)$', re.IGNORECASE)
+
+def normalize_field(name: str) -> str:
+    name = re.sub(r"\s+", " ", str(name).strip())
+    m = FRAME_FIELD_RE.match(name)
+    if m:
+        kind, num = m.group(1), m.group(2)
+        return f"{kind} Frame {num if num else '1'}"
+    return name
 
 
 def parse_annotation_sheet(path, sheet_name=1):
@@ -53,7 +62,7 @@ def parse_annotation_sheet(path, sheet_name=1):
 
         if state == "WAITING_FOR_HEADER":
             if "Interaction" in values_str:
-                col_map = {c: str(v).strip() for c, v in non_null}
+                col_map = {c: normalize_field(v) for c, v in non_null}
                 state = "IN_BLOCK"
             # else: stray row before the header, ignore
             continue
@@ -66,7 +75,7 @@ def parse_annotation_sheet(path, sheet_name=1):
                 if field is None:
                     continue
                 record[field] = v
-                if field in ("Starting Frame", "Ending Frame"):
+                if FRAME_FIELD_RE.match(field):
                     has_data = True
             if has_data:
                 record["id"] = event_id
@@ -78,9 +87,12 @@ def parse_annotation_sheet(path, sheet_name=1):
     if df.empty:
         return df
 
+    frame_cols = sorted(
+        [c for c in df.columns if FRAME_FIELD_RE.match(c)],
+        key=lambda c: (c.split()[0], int(re.search(r"\d+", c).group()))
+    )
     preferred = ["id", "Camera", "Video", "Interaction", "Number of persons involved",
-                 "First person", "Second person", "Third person",
-                 "Starting Frame", "Ending Frame"]
+                 "First person", "Second person", "Third person"] + frame_cols
     cols = [c for c in preferred if c in df.columns] + \
            [c for c in df.columns if c not in preferred]
     return df[cols]
@@ -95,21 +107,33 @@ def parse_video_filename(path):
         raise ValueError(f"Filename doesn't match expected pattern 'Situation.CamN.avi': {fname}")
     return m.group("situation"), int(m.group("cam"))
 
+def _extract_frame_intervals(row):
+    starts = {}
+    ends = {}
+    for col, val in row.items():
+        if pd.isna(val):
+            continue
+        m = FRAME_FIELD_RE.match(str(col))
+        if not m:
+            continue
+        kind, num = m.group(1), m.group(2) or "1"
+        if kind.lower() == "starting":
+            starts[num] = val
+        else:
+            ends[num] = val
+
+    common = sorted(set(starts) & set(ends), key=lambda n: int(n))
+    return [(int(starts[n]), int(ends[n])) for n in common]
 
 def get_violence_segments(df, video, camera, total_frames=None):
     """
     Returns None if this (video, camera) has no Fight-type interaction
-    (i.e. it's not "useful" and should be skipped).
 
-    Otherwise returns a sorted list of (label, start_frame, end_frame)
-    tuples covering the whole video: label=1 for fight, 0 for everything
-    else. If total_frames is given, a trailing (0, last_fight_end,
-    total_frames) segment is appended when the video continues past the
-    last fight.
+    Returns a sorted list of (label, start_frame, end_frame)
+    tuples: 1 for fight, 0 for everything else.
 
     Handles multiple fight intervals per video (e.g. "Fight 1", "Fight 2")
-    by sorting and treating each independently -- adjust here if
-    overlapping fights should be merged instead.
+    by sorting and treating each independently
     """
     subset = df[(df["Video"] == video) & (df["Camera"] == camera)]
     fight_rows = subset[subset["Interaction"].str.contains("Fight", case=False, na=False)]
@@ -117,10 +141,14 @@ def get_violence_segments(df, video, camera, total_frames=None):
     if fight_rows.empty:
         return None  # skip: not a violence-relevant video
 
-    intervals = sorted(
-        (int(r["Starting Frame"]), int(r["Ending Frame"]))
-        for _, r in fight_rows.iterrows()
-    )
+    intervals=[]
+    for _, r in fight_rows.iterrows():
+        intervals.extend(_extract_frame_intervals(r))
+
+    if not intervals:
+        return None
+
+    intervals.sort()
 
     segments = []
     cursor = 0
@@ -128,7 +156,7 @@ def get_violence_segments(df, video, camera, total_frames=None):
         if start > cursor:
             segments.append((0, cursor, start))
         segments.append((1, start, end))
-        cursor = end
+        cursor = max(cursor, end)
 
     if total_frames is not None and total_frames > cursor:
         segments.append((0, cursor, total_frames))
@@ -210,6 +238,7 @@ def run_inference(model, video_path, processor, clip_len=None, stride=None, batc
             results.append(meta)
         batch_clips, batch_meta = [], []
 
+    previous_entry=0
     for start_index in windows:
         frames, indexes = sample_clip(vr, start_index, clip_len, stride)
         inputs = preprocess(frames, processor)
@@ -220,8 +249,11 @@ def run_inference(model, video_path, processor, clip_len=None, stride=None, batc
         if len(batch_clips) == batch_size:
             flush()
 
-        flush()
-        print(f"Processed {round(indexes[-1] / fps, 2)} seconds")
+
+        if round(indexes[-1] / fps, 2) - previous_entry > 10:
+            print(f"Processed {round(indexes[-1] / fps, 2)} seconds")
+            previous_entry = round(indexes[-1] / fps, 2)
+    flush()
 
     return results, fps, total_frames
 
