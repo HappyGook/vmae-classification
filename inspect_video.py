@@ -1,4 +1,5 @@
 import json
+import os
 import matplotlib.pyplot as plt
 
 
@@ -9,6 +10,7 @@ def _mmss(seconds: float) -> str:
 
 def load_result(path):
     """Load a result dict previously saved by evaluate_video(..., save=True)."""
+    path = os.path.expanduser(path)
     with open(path, "r") as f:
         return json.load(f)
 
