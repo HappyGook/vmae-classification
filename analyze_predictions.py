@@ -86,6 +86,8 @@ def analyze_preset(preset_name: str):
     error_rate = 1 - accuracy
     fpr = fp / (fp + tn) if (fp + tn) else 0.0  # rate among actually non-violent videos
     fnr = fn / (fn + tp) if (fn + tp) else 0.0  # rate among actually violent videos
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
 
     # most common predicted classes, split by ground truth (regardless of correctness)
     violent_classes = df.loc[df["gt_positive"], "top1_class"].value_counts()
@@ -98,6 +100,7 @@ def analyze_preset(preset_name: str):
     print(
         f"{preset_name:12s}  n={total:4d}  acc={accuracy:.2f}  "
         f"error={error_rate:.2f}  FPR={fpr:.2f}  FNR={fnr:.2f}  "
+        f"precision={precision:.2f}  recall={recall:.2f} "
         f"(TP={tp} TN={tn} FP={fp} FN={fn})"
     )
 
@@ -105,6 +108,7 @@ def analyze_preset(preset_name: str):
         "preset": preset_name,
         "n": total, "tp": tp, "tn": tn, "fp": fp, "fn": fn,
         "accuracy": accuracy, "error_rate": error_rate, "fpr": fpr, "fnr": fnr,
+        "precision": precision, "recall": recall,
         "violent_classes": violent_classes,
         "nonviolent_classes": nonviolent_classes,
         "fp_classes": fp_classes,
