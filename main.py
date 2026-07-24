@@ -8,7 +8,7 @@ from boss_eval import evaluate_dataset
 from torch import nn
 from torch.utils.data import DataLoader
 import config
-from dataset import BusViolenceDataset
+from bus_dataset import BusViolenceDataset
 from model import build_processor, build_model
 
 
