@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-
+from metrics import compute_binary_metrics
 # ---------------------------------------------------------------------------
 # 1) Per-preset mapping: which top1_class counts as "violence"
 # ---------------------------------------------------------------------------
@@ -69,46 +69,57 @@ def analyze_preset(preset_name: str):
     csv_path = PREDICTIONS_DIR / PRESET_CSV_MAP[preset_name]
 
     if not csv_path.exists():
-        print(f"⚠ {csv_path} not found — skipping '{preset_name}'")
+        print(f"!! {csv_path} not found — skipping '{preset_name}'")
         return None
 
     df = pd.read_csv(csv_path)
     df["gt_positive"] = df["gt_label"] == "violence"
     df["pred_positive"] = classify_as_violent(df["top1_class"], rule)
 
-    tp = int((df["gt_positive"] & df["pred_positive"]).sum())
-    tn = int((~df["gt_positive"] & ~df["pred_positive"]).sum())
-    fp = int((~df["gt_positive"] & df["pred_positive"]).sum())
-    fn = int((df["gt_positive"] & ~df["pred_positive"]).sum())
-    total = len(df)
+    metrics = compute_binary_metrics(
+        df["gt_positive"].astype(int),
+        df["pred_positive"].astype(int),
+    )
 
-    accuracy = (tp + tn) / total if total else 0.0
-    error_rate = 1 - accuracy
-    fpr = fp / (fp + tn) if (fp + tn) else 0.0  # rate among actually non-violent videos
-    fnr = fn / (fn + tp) if (fn + tp) else 0.0  # rate among actually violent videos
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    error_rate = 1 - metrics["accuracy"]
+    fpr = (
+        metrics["fp"] / (metrics["fp"] + metrics["tn"])
+        if metrics["fp"] + metrics["tn"]
+        else 0.0
+    )
+    fnr = (
+        metrics["fn"] / (metrics["fn"] + metrics["tp"])
+        if metrics["fn"] + metrics["tp"]
+        else 0.0
+    )
 
-    # most common predicted classes, split by ground truth (regardless of correctness)
     violent_classes = df.loc[df["gt_positive"], "top1_class"].value_counts()
     nonviolent_classes = df.loc[~df["gt_positive"], "top1_class"].value_counts()
-
-    # classes responsible for false positives / false negatives
     fp_classes = df.loc[~df["gt_positive"] & df["pred_positive"], "top1_class"].value_counts()
     fn_classes = df.loc[df["gt_positive"] & ~df["pred_positive"], "top1_class"].value_counts()
 
     print(
-        f"{preset_name:12s}  n={total:4d}  acc={accuracy:.2f}  "
-        f"error={error_rate:.2f}  FPR={fpr:.2f}  FNR={fnr:.2f}  "
-        f"precision={precision:.2f}  recall={recall:.2f} "
-        f"(TP={tp} TN={tn} FP={fp} FN={fn})"
+        f"{preset_name:12s}  n={metrics['n']:4d}  "
+        f"acc={metrics['accuracy']:.2f}  error={error_rate:.2f}  "
+        f"FPR={fpr:.2f}  FNR={fnr:.2f}  "
+        f"precision={metrics['precision']:.2f}  recall={metrics['recall']:.2f} "
+        f"(TP={metrics['tp']} TN={metrics['tn']} FP={metrics['fp']} FN={metrics['fn']})"
     )
 
     return {
         "preset": preset_name,
-        "n": total, "tp": tp, "tn": tn, "fp": fp, "fn": fn,
-        "accuracy": accuracy, "error_rate": error_rate, "fpr": fpr, "fnr": fnr,
-        "precision": precision, "recall": recall,
+        "n": metrics["n"],
+        "tp": metrics["tp"],
+        "tn": metrics["tn"],
+        "fp": metrics["fp"],
+        "fn": metrics["fn"],
+        "accuracy": metrics["accuracy"],
+        "error_rate": error_rate,
+        "fpr": fpr,
+        "fnr": fnr,
+        "precision": metrics["precision"],
+        "recall": metrics["recall"],
+        "f1": metrics["f1"],
         "violent_classes": violent_classes,
         "nonviolent_classes": nonviolent_classes,
         "fp_classes": fp_classes,

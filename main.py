@@ -3,18 +3,21 @@ import csv
 from pathlib import Path
 import time
 import torch
-from inference import parse_annotation_sheet
-from boss_eval import evaluate_dataset
 from torch import nn
 from torch.utils.data import DataLoader
 import config
+from boss.boss_annotations import parse_annotation_sheet
+from boss.boss_eval import evaluate_dataset
 from bus_dataset import BusViolenceDataset
-from model import build_processor, build_model
+from model import build_model, build_model_for_finetuning, build_processor, freeze_encoder
 
 
 def train():
     processor = build_processor()
-    model = build_model()
+    model = build_model_for_finetuning(num_labels=2)
+    if config.FREEZE_ENCODER:
+        freeze_encoder(model)
+
     print("\n=== MODEL DEBUG INFO ===")
     print(f"Model class: {model.__class__.__name__}")
     print(f"Device target: {config.DEVICE}")
@@ -39,22 +42,30 @@ def train():
         split="test",
     )
 
-
-    train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE,
-                              shuffle=True, num_workers=config.NUM_WORKERS,
-                              pin_memory=config.DEVICE == "cuda")
-    val_loader   = DataLoader(val_dataset,   batch_size=config.BATCH_SIZE,
-                              shuffle=False, num_workers=config.NUM_WORKERS,
-                              pin_memory=config.DEVICE == "cuda")
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config.BATCH_SIZE,
+        shuffle=True,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=config.DEVICE == "cuda",
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config.BATCH_SIZE,
+        shuffle=False,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=config.DEVICE == "cuda",
+    )
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(
-        filter(lambda p: p.requires_grad, model.parameters()),
+        filter(lambda param: param.requires_grad, model.parameters()),
         lr=config.LEARNING_RATE,
         weight_decay=config.WEIGHT_DECAY,
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=config.EPOCHS
+        optimizer,
+        T_max=config.EPOCHS,
     )
 
     save_dir = Path(config.CHECKPOINT_DIR)
@@ -66,82 +77,83 @@ def train():
         epoch_start = time.time()
         current_lr = optimizer.param_groups[0]["lr"]
         print(f"\n--- Starting epoch {epoch}/{config.EPOCHS} | lr={current_lr:.8f} ---")
-        # ── Train ──────────────────────────────────────────────
+
         model.train()
-        train_loss, train_correct, train_total = 0.0, 0, 0
+        train_loss = 0.0
+        train_correct = 0
+        train_total = 0
+
         for pixel_values, labels, _ in train_loader:
-            batch_start = time.time()
-            print(f"Batch {train_total // config.BATCH_SIZE + 1}: input shape={tuple(pixel_values.shape)}, labels={labels.tolist()}")
             pixel_values = pixel_values.to(config.DEVICE)
-            labels       = labels.to(config.DEVICE)
+            labels = labels.to(config.DEVICE)
 
             optimizer.zero_grad()
-            logits = model(pixel_values=pixel_values).logits   # (B, 2)
-            loss   = criterion(logits, labels)
+
+            logits = model(pixel_values=pixel_values).logits
+            loss = criterion(logits, labels)
+
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            batch_time = time.time() - batch_start
-            print(f"    loss={loss.item():.5f} | batch_time={batch_time:.3f}s | grad_norm={grad_norm:.5f}")
 
-            train_loss    += loss.item() * labels.size(0)
+            train_loss += loss.item() * labels.size(0)
             train_correct += (logits.argmax(1) == labels).sum().item()
-            train_total   += labels.size(0)
+            train_total += labels.size(0)
+
+            print(
+                f"batch={train_total // config.BATCH_SIZE} "
+                f"loss={loss.item():.5f} grad_norm={grad_norm:.5f}"
+            )
 
         scheduler.step()
 
-        # ── Validate ───────────────────────────────────────────
         model.eval()
-        val_loss, val_correct, val_total = 0.0, 0, 0
+        val_loss = 0.0
+        val_correct = 0
+        val_total = 0
 
         with torch.no_grad():
             for pixel_values, labels, _ in val_loader:
                 pixel_values = pixel_values.to(config.DEVICE)
-                labels       = labels.to(config.DEVICE)
-                logits = model(pixel_values=pixel_values).logits
-                loss   = criterion(logits, labels)
-                val_loss    += loss.item() * labels.size(0)
-                val_correct += (logits.argmax(1) == labels).sum().item()
-                val_total   += labels.size(0)
+                labels = labels.to(config.DEVICE)
 
-        t_acc = train_correct / train_total
-        v_acc = val_correct   / val_total
-        t_l   = train_loss    / train_total
-        v_l   = val_loss      / val_total
+                logits = model(pixel_values=pixel_values).logits
+                loss = criterion(logits, labels)
+
+                val_loss += loss.item() * labels.size(0)
+                val_correct += (logits.argmax(1) == labels).sum().item()
+                val_total += labels.size(0)
+
+        train_acc = train_correct / train_total
+        val_acc = val_correct / val_total
+        train_avg_loss = train_loss / train_total
+        val_avg_loss = val_loss / val_total
 
         epoch_time = time.time() - epoch_start
-        print(f"Epoch {epoch:>3}/{config.EPOCHS} finished in {epoch_time:.2f}s")
-        print(f"  train loss={t_l:.4f} acc={t_acc:.3f}")
-        print(f"  val   loss={v_l:.4f} acc={v_acc:.3f}")
+
+        print(f"Epoch {epoch}/{config.EPOCHS} finished in {epoch_time:.2f}s")
+        print(f"  train loss={train_avg_loss:.4f} acc={train_acc:.3f}")
+        print(f"  val   loss={val_avg_loss:.4f} acc={val_acc:.3f}")
         print(f"  lr={optimizer.param_groups[0]['lr']:.8f}")
-        print(f"  best_val_acc={best_val_acc:.3f}")
 
-        # ── Save best checkpoint ───────────────────────────────
-        if v_acc > best_val_acc:
-            best_val_acc = v_acc
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
             best_path = save_dir / "best"
-            print("Checkpoint debug:")
-            print(f"  Saving epoch: {epoch}")
-            print(f"  Validation accuracy: {v_acc:.5f}")
-            print(f"  Directory: {best_path.resolve()}")
-            print(f"  Files before save: {list(best_path.glob('*')) if best_path.exists() else 'directory does not exist'}")
-            model.save_pretrained(best_path)       # saves config.json + model weights
-            processor.save_pretrained(best_path)   # saves preprocessor_config.json
-            print(f"  Files after save: {[p.name for p in best_path.glob('*')]}")
-            print(f"  ✓ saved best model (val_acc={v_acc:.3f}) → {best_path}")
 
-        # ── Save periodic checkpoint every N epochs ────────────
+            model.save_pretrained(best_path)
+            processor.save_pretrained(best_path)
+
+            print(f"  saved best model val_acc={val_acc:.3f} -> {best_path}")
+
         if epoch % config.SAVE_EVERY == 0:
-            ckpt_path = save_dir / f"epoch_{epoch:03d}"
-            print(f"Checkpoint debug: periodic save at epoch {epoch}")
-            print(f"  Path: {ckpt_path.resolve()}")
-            model.save_pretrained(ckpt_path)
-            processor.save_pretrained(ckpt_path)
-            print(f"  Saved files: {[p.name for p in ckpt_path.glob('*')]}")
-            print(f"  ✓ checkpoint saved → {ckpt_path}")
+            checkpoint_path = save_dir / f"epoch_{epoch:03d}"
+
+            model.save_pretrained(checkpoint_path)
+            processor.save_pretrained(checkpoint_path)
+
+            print(f"  saved checkpoint -> {checkpoint_path}")
 
     print(f"\nTraining complete. Best val accuracy: {best_val_acc:.3f}")
-    print(f"Best model saved to: {(save_dir / 'best').resolve()}")
 
 
 def run():
@@ -217,36 +229,67 @@ def run():
 
     print(f"Saved {len(rows)} rows → {out.resolve()}")
 
-def boss_inference():
-    processor = build_processor()
-    model = build_model("checkpoints/best")
+def boss_inference(args):
+    processor = build_processor(args.model)
+    model = build_model(args.model)
+    model.eval()
 
-    df = parse_annotation_sheet("boss/AnnotationsBOSS_v1.xlsx", sheet_name=1)
-    report = evaluate_dataset(model, "boss", processor, df,
-                              device=config.DEVICE, threshold=0.5)
+    annotations_df = parse_annotation_sheet(args.annotations, sheet_name=args.sheet)
+
+    report = evaluate_dataset(
+        model,
+        args.video_dir,
+        processor,
+        annotations_df,
+        clip_len=args.clip_len,
+        stride=args.stride,
+        hop=args.hop,
+        batch_size=args.batch_size,
+        device=config.DEVICE,
+        threshold=args.threshold,
+        cameras=args.cameras,
+        save_dir=args.save_dir,
+        dataset_filename=args.out,
+    )
 
     print("Metrics:", report["metrics"])
-    print(f"{len(report['errors'])} misclassified windows across "
-          f"{len(report['per_video'])} evaluated videos "
-          f"({len(report['skipped'])} skipped)")
+    print(
+        f"{len(report['errors'])} misclassified windows across "
+        f"{len(report['per_video'])} evaluated videos "
+        f"({len(report['skipped'])} skipped)"
+    )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["train", "run", "boss"], default="run")
     parser.add_argument("--preset", choices=list(config.PRESETS), default=config.DEFAULT_PRESET)
-    parser.add_argument("--clip_len", type=int, default=48)
-    parser.add_argument("--stride", type=int, default=1,
-                        help="sliding step between window starts, in sampled-frame units; "
-                             "smaller = more overlap = better localization, slower")
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--out", default="inference.json")
+
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--video-dir", default="boss")
+    parser.add_argument("--annotations", default="AnnotationsBOSS_v1.xlsx")
+    parser.add_argument("--sheet", type=int, default=1)
+
+    parser.add_argument("--clip-len", type=int, default=16)
+    parser.add_argument("--stride", type=int, default=config.STRIDE)
+    parser.add_argument("--hop", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--cameras", type=int, nargs="*", default=None)
+
+    parser.add_argument("--save-dir", default="boss-evals")
+    parser.add_argument("--out", default="full_boss-evals")
+
     args = parser.parse_args()
 
     config.apply_preset(args.preset)
+
+    if args.model is None:
+        args.model = config.MODEL_NAME
 
     if args.mode == "train":
         train()
     elif args.mode == "run":
         run()
     elif args.mode == "boss":
-        boss_inference()
+        boss_inference(args)
